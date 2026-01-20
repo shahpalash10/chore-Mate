@@ -14,7 +14,9 @@ const supabaseUrl = window.__supabase_url || 'https://YOUR-PROJECT-ID.supabase.c
 const supabaseAnonKey = window.__supabase_anon_key || 'YOUR-ANON-KEY';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-
+// App version for cache busting - increment this when making auth changes
+const APP_VERSION = '1.1.0';
+const VERSION_KEY = 'chore_mate_version';
 
 /* -------------------------------------------------------------------------- */
 /* HELPER FUNCTIONS                             */
@@ -110,7 +112,7 @@ export default function OfficeChoresApp() {
 
     useEffect(() => {
         let isLoadingProfile = false; // Prevent race conditions
-        let loadingTimeout = null; // retained for compatibility but not used
+        let loadingTimeout = null;
         let mounted = true;
 
         const initAuth = async () => {
@@ -130,7 +132,14 @@ export default function OfficeChoresApp() {
                     window.history.replaceState({}, '', newUrl);
                 }
 
-
+                // Version check & cache invalidation
+                const storedVersion = localStorage.getItem(VERSION_KEY);
+                if (storedVersion !== APP_VERSION) {
+                    console.log(`Version changed from ${storedVersion} to ${APP_VERSION} - clearing cache`);
+                    clearAuthCache();
+                    localStorage.setItem(VERSION_KEY, APP_VERSION);
+                    cacheWasCleared = true;
+                }
 
                 // If we just cleared the cache, immediately sign out and show login
                 if (cacheWasCleared) {
@@ -145,14 +154,15 @@ export default function OfficeChoresApp() {
                     return;
                 }
 
-                // Safety timeout: force loading to false after 3 seconds to prevent infinite loading
-                // Don't clear cache here - let user retry or use the emergency button
+                // Safety timeout: force loading to false after 1 second (ONLY for normal loads, not after cache clear)
+                // This timeout is only set if we didn't clear cache above
                 loadingTimeout = setTimeout(() => {
                     if (!mounted) return;
                     console.warn('Loading timeout - forcing loading to false');
                     setLoading(false);
-                    setAuthError('Loading timeout. Please try again.');
-                }, 3000);
+                    setAuthError('Loading timeout. Please refresh the page or clear your cache.');
+                    clearAuthCache();
+                }, 1000);
 
                 // Validate and refresh session
                 const { data: { session }, error } = await supabase.auth.getSession();
@@ -183,8 +193,6 @@ export default function OfficeChoresApp() {
                     setUser(session.user);
                     isLoadingProfile = true;
                     await loadUserProfile(session.user.id);
-                    // Loading is complete after profile is loaded
-                    setLoading(false);
                     isLoadingProfile = false;
                 } else {
                     if (!mounted) return;
@@ -192,9 +200,10 @@ export default function OfficeChoresApp() {
                 }
             } catch (err) {
                 console.error('Auth initialization error:', err);
+                clearAuthCache();
                 if (mounted) setLoading(false);
             } finally {
-                // No timeout to clear
+                if (loadingTimeout) clearTimeout(loadingTimeout);
             }
         };
 
@@ -204,7 +213,8 @@ export default function OfficeChoresApp() {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             console.log('Auth state changed:', event, session?.user?.email);
 
-            // No timeout handling needed here
+            // Clear any existing timeout
+            if (loadingTimeout) clearTimeout(loadingTimeout);
 
             if (session) {
                 // Prevent multiple concurrent profile loads
@@ -699,6 +709,8 @@ export default function OfficeChoresApp() {
             const url = new URL(window.location.href);
             url.searchParams.set('clearCache', '1');
             window.open(url.toString(), '_blank');
+            // Close the current stuck tab
+            window.close();
         };
 
         return (
