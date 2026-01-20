@@ -685,11 +685,8 @@ export default function OfficeChoresApp() {
     // --- Renderers ---
 
     if (loading) {
-        const handleClearCacheAndRetry = () => {
-            clearAuthCache();
-            supabase.auth.signOut().then(() => {
-                window.location.reload();
-            });
+        const handleOpenInNewTab = () => {
+            window.open(window.location.href, '_blank');
         };
 
         return (
@@ -700,13 +697,13 @@ export default function OfficeChoresApp() {
                     </div>
                     <span className="font-bold mb-4">Loading...</span>
 
-                    {/* Emergency cache clear button - appears after 5 seconds */}
+                    {/* Emergency retry button - appears after 5 seconds */}
                     <button
-                        onClick={handleClearCacheAndRetry}
+                        onClick={handleOpenInNewTab}
                         className="mt-4 text-xs text-gray-500 hover:text-rose-500 underline opacity-0 animate-[fadeIn_1s_ease-in-out_5s_forwards]"
                         style={{ animation: 'fadeIn 1s ease-in-out 5s forwards' }}
                     >
-                        Stuck? Clear cache & retry
+                        Stuck? Open in new tab
                     </button>
                 </div>
 
