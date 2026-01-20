@@ -108,38 +108,6 @@ export default function OfficeChoresApp() {
         }
     };
 
-    // --- Version Check & Cache Invalidation ---
-    useEffect(() => {
-        // Check for manual cache clear parameter (from "Open in new tab" button)
-        const urlParams = new URLSearchParams(window.location.search);
-        const shouldClearCache = urlParams.get('clearCache');
-
-        if (shouldClearCache === '1') {
-            console.log('Manual cache clear requested - clearing cache instantly');
-            clearAuthCache();
-            // Remove the parameter from URL to clean it up
-            urlParams.delete('clearCache');
-            const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
-            window.history.replaceState({}, '', newUrl);
-        }
-
-        const storedVersion = localStorage.getItem(VERSION_KEY);
-
-        if (storedVersion !== APP_VERSION) {
-            console.log(`Version changed from ${storedVersion} to ${APP_VERSION} - clearing cache`);
-            clearAuthCache();
-            localStorage.setItem(VERSION_KEY, APP_VERSION);
-
-            // Force a clean session check
-            supabase.auth.getSession().then(({ data: { session } }) => {
-                if (!session) {
-                    // No valid session, ensure we're logged out
-                    supabase.auth.signOut();
-                }
-            });
-        }
-    }, []);
-
     // --- 1. Authentication & Profile Sync ---
 
     useEffect(() => {
@@ -149,14 +117,50 @@ export default function OfficeChoresApp() {
 
         const initAuth = async () => {
             try {
-                // Safety timeout: force loading to false after 8 seconds
+                // Check for manual cache clear parameter (from "Open in new tab" button)
+                const urlParams = new URLSearchParams(window.location.search);
+                const shouldClearCache = urlParams.get('clearCache');
+                let cacheWasCleared = false;
+
+                if (shouldClearCache === '1') {
+                    console.log('Manual cache clear requested - clearing cache instantly');
+                    clearAuthCache();
+                    cacheWasCleared = true;
+                    // Remove the parameter from URL to clean it up
+                    urlParams.delete('clearCache');
+                    const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+                    window.history.replaceState({}, '', newUrl);
+                }
+
+                // Version check & cache invalidation
+                const storedVersion = localStorage.getItem(VERSION_KEY);
+                if (storedVersion !== APP_VERSION) {
+                    console.log(`Version changed from ${storedVersion} to ${APP_VERSION} - clearing cache`);
+                    clearAuthCache();
+                    localStorage.setItem(VERSION_KEY, APP_VERSION);
+                    cacheWasCleared = true;
+                }
+
+                // If we just cleared the cache, immediately sign out and show login
+                if (cacheWasCleared) {
+                    console.log('Cache cleared - signing out immediately');
+                    await supabase.auth.signOut();
+                    if (!mounted) return;
+                    setUser(null);
+                    setUserProfile(null);
+                    setViewState('login');
+                    setLoading(false);
+                    return;
+                }
+
+                // Safety timeout: force loading to false after 1 second (only for normal loads)
                 loadingTimeout = setTimeout(() => {
                     if (!mounted) return;
                     console.warn('Loading timeout - forcing loading to false');
                     setLoading(false);
                     setAuthError('Loading timeout. Please refresh the page or clear your cache.');
                     clearAuthCache();
-                }, 8000);
+                }, 1000);
 
                 // Validate and refresh session
                 const { data: { session }, error } = await supabase.auth.getSession();
@@ -713,11 +717,11 @@ export default function OfficeChoresApp() {
                     </div>
                     <span className="font-bold mb-4">Loading...</span>
 
-                    {/* Emergency retry button - appears after 5 seconds */}
+                    {/* Emergency retry button - appears after 2 seconds */}
                     <button
                         onClick={handleOpenInNewTab}
-                        className="mt-4 text-xs text-gray-500 hover:text-rose-500 underline opacity-0 animate-[fadeIn_1s_ease-in-out_5s_forwards]"
-                        style={{ animation: 'fadeIn 1s ease-in-out 5s forwards' }}
+                        className="mt-4 text-xs text-gray-500 hover:text-rose-500 underline opacity-0 animate-[fadeIn_1s_ease-in-out_2s_forwards]"
+                        style={{ animation: 'fadeIn 1s ease-in-out 2s forwards' }}
                     >
                         Stuck? Open in new tab
                     </button>
