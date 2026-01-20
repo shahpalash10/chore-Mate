@@ -110,7 +110,7 @@ export default function OfficeChoresApp() {
 
     useEffect(() => {
         let isLoadingProfile = false; // Prevent race conditions
-        let loadingTimeout = null;
+        let loadingTimeout = null; // retained for compatibility but not used
         let mounted = true;
 
         const initAuth = async () => {
@@ -183,6 +183,8 @@ export default function OfficeChoresApp() {
                     setUser(session.user);
                     isLoadingProfile = true;
                     await loadUserProfile(session.user.id);
+                    // Loading is complete after profile is loaded
+                    setLoading(false);
                     isLoadingProfile = false;
                 } else {
                     if (!mounted) return;
@@ -190,10 +192,9 @@ export default function OfficeChoresApp() {
                 }
             } catch (err) {
                 console.error('Auth initialization error:', err);
-                // Don't clear cache on generic errors - let user retry
                 if (mounted) setLoading(false);
             } finally {
-                if (loadingTimeout) clearTimeout(loadingTimeout);
+                // No timeout to clear
             }
         };
 
@@ -203,8 +204,7 @@ export default function OfficeChoresApp() {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             console.log('Auth state changed:', event, session?.user?.email);
 
-            // Clear any existing timeout
-            if (loadingTimeout) clearTimeout(loadingTimeout);
+            // No timeout handling needed here
 
             if (session) {
                 // Prevent multiple concurrent profile loads
