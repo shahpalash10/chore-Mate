@@ -150,10 +150,12 @@ export default function OfficeChoresApp() {
                     setUserProfile(null);
                     setViewState('login');
                     setLoading(false);
+                    // Do NOT set timeout since we're done here
                     return;
                 }
 
-                // Safety timeout: force loading to false after 1 second (only for normal loads)
+                // Safety timeout: force loading to false after 1 second (ONLY for normal loads, not after cache clear)
+                // This timeout is only set if we didn't clear cache above
                 loadingTimeout = setTimeout(() => {
                     if (!mounted) return;
                     console.warn('Loading timeout - forcing loading to false');
