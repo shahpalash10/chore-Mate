@@ -686,7 +686,10 @@ export default function OfficeChoresApp() {
 
     if (loading) {
         const handleOpenInNewTab = () => {
-            window.open(window.location.href, '_blank');
+            // Open in new tab with clearCache parameter
+            const url = new URL(window.location.href);
+            url.searchParams.set('clearCache', '1');
+            window.open(url.toString(), '_blank');
         };
 
         return (
