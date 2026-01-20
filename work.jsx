@@ -14,9 +14,7 @@ const supabaseUrl = window.__supabase_url || 'https://YOUR-PROJECT-ID.supabase.c
 const supabaseAnonKey = window.__supabase_anon_key || 'YOUR-ANON-KEY';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// App version for cache busting - increment this when making auth changes
-const APP_VERSION = '1.1.0';
-const VERSION_KEY = 'chore_mate_version';
+
 
 /* -------------------------------------------------------------------------- */
 /* HELPER FUNCTIONS                             */
@@ -132,14 +130,7 @@ export default function OfficeChoresApp() {
                     window.history.replaceState({}, '', newUrl);
                 }
 
-                // Version check & cache invalidation
-                const storedVersion = localStorage.getItem(VERSION_KEY);
-                if (storedVersion !== APP_VERSION) {
-                    console.log(`Version changed from ${storedVersion} to ${APP_VERSION} - clearing cache`);
-                    clearAuthCache();
-                    localStorage.setItem(VERSION_KEY, APP_VERSION);
-                    cacheWasCleared = true;
-                }
+
 
                 // If we just cleared the cache, immediately sign out and show login
                 if (cacheWasCleared) {
@@ -154,15 +145,14 @@ export default function OfficeChoresApp() {
                     return;
                 }
 
-                // Safety timeout: force loading to false after 1 second (ONLY for normal loads, not after cache clear)
-                // This timeout is only set if we didn't clear cache above
+                // Safety timeout: force loading to false after 3 seconds to prevent infinite loading
+                // Don't clear cache here - let user retry or use the emergency button
                 loadingTimeout = setTimeout(() => {
                     if (!mounted) return;
                     console.warn('Loading timeout - forcing loading to false');
                     setLoading(false);
-                    setAuthError('Loading timeout. Please refresh the page or clear your cache.');
-                    clearAuthCache();
-                }, 1000);
+                    setAuthError('Loading timeout. Please try again.');
+                }, 3000);
 
                 // Validate and refresh session
                 const { data: { session }, error } = await supabase.auth.getSession();
@@ -200,7 +190,7 @@ export default function OfficeChoresApp() {
                 }
             } catch (err) {
                 console.error('Auth initialization error:', err);
-                clearAuthCache();
+                // Don't clear cache on generic errors - let user retry
                 if (mounted) setLoading(false);
             } finally {
                 if (loadingTimeout) clearTimeout(loadingTimeout);
