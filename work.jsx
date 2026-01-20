@@ -110,6 +110,19 @@ export default function OfficeChoresApp() {
 
     // --- Version Check & Cache Invalidation ---
     useEffect(() => {
+        // Check for manual cache clear parameter (from "Open in new tab" button)
+        const urlParams = new URLSearchParams(window.location.search);
+        const shouldClearCache = urlParams.get('clearCache');
+
+        if (shouldClearCache === '1') {
+            console.log('Manual cache clear requested - clearing cache instantly');
+            clearAuthCache();
+            // Remove the parameter from URL to clean it up
+            urlParams.delete('clearCache');
+            const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+            window.history.replaceState({}, '', newUrl);
+        }
+
         const storedVersion = localStorage.getItem(VERSION_KEY);
 
         if (storedVersion !== APP_VERSION) {
