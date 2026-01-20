@@ -14,6 +14,10 @@ const supabaseUrl = window.__supabase_url || 'https://YOUR-PROJECT-ID.supabase.c
 const supabaseAnonKey = window.__supabase_anon_key || 'YOUR-ANON-KEY';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// App version for cache busting - increment this when making auth changes
+const APP_VERSION = '1.1.0';
+const VERSION_KEY = 'chore_mate_version';
+
 /* -------------------------------------------------------------------------- */
 /* HELPER FUNCTIONS                             */
 /* -------------------------------------------------------------------------- */
@@ -86,29 +90,101 @@ export default function OfficeChoresApp() {
         { name: 'General', icon: <Check size={16} />, color: 'bg-gray-100 text-gray-700' }
     ];
 
+    // --- Cache Cleanup Helper ---
+    const clearAuthCache = () => {
+        try {
+            // Clear any stale auth-related data from localStorage
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.includes('supabase') || key.includes('auth'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(key => localStorage.removeItem(key));
+            console.log('Auth cache cleared');
+        } catch (err) {
+            console.error('Error clearing auth cache:', err);
+        }
+    };
+
+    // --- Version Check & Cache Invalidation ---
+    useEffect(() => {
+        const storedVersion = localStorage.getItem(VERSION_KEY);
+
+        if (storedVersion !== APP_VERSION) {
+            console.log(`Version changed from ${storedVersion} to ${APP_VERSION} - clearing cache`);
+            clearAuthCache();
+            localStorage.setItem(VERSION_KEY, APP_VERSION);
+
+            // Force a clean session check
+            supabase.auth.getSession().then(({ data: { session } }) => {
+                if (!session) {
+                    // No valid session, ensure we're logged out
+                    supabase.auth.signOut();
+                }
+            });
+        }
+    }, []);
+
     // --- 1. Authentication & Profile Sync ---
 
     useEffect(() => {
+        let isLoadingProfile = false; // Prevent race conditions
+        let loadingTimeout = null;
+        let mounted = true;
+
         const initAuth = async () => {
             try {
-                // Check for existing session
+                // Safety timeout: force loading to false after 8 seconds
+                loadingTimeout = setTimeout(() => {
+                    if (!mounted) return;
+                    console.warn('Loading timeout - forcing loading to false');
+                    setLoading(false);
+                    setAuthError('Loading timeout. Please refresh the page or clear your cache.');
+                    clearAuthCache();
+                }, 8000);
+
+                // Validate and refresh session
                 const { data: { session }, error } = await supabase.auth.getSession();
 
                 if (error) {
                     console.error('Session error:', error);
+                    // Clear potentially corrupted session data
+                    clearAuthCache();
+                    await supabase.auth.signOut();
                     setLoading(false);
                     return;
                 }
 
                 if (session) {
+                    // Verify session is not expired
+                    const expiresAt = session.expires_at;
+                    const now = Math.floor(Date.now() / 1000);
+
+                    if (expiresAt && expiresAt < now) {
+                        console.warn('Session expired, signing out');
+                        clearAuthCache();
+                        await supabase.auth.signOut();
+                        setLoading(false);
+                        return;
+                    }
+
+                    if (!mounted) return;
                     setUser(session.user);
+                    isLoadingProfile = true;
                     await loadUserProfile(session.user.id);
+                    isLoadingProfile = false;
                 } else {
+                    if (!mounted) return;
                     setLoading(false);
                 }
             } catch (err) {
                 console.error('Auth initialization error:', err);
-                setLoading(false);
+                clearAuthCache();
+                if (mounted) setLoading(false);
+            } finally {
+                if (loadingTimeout) clearTimeout(loadingTimeout);
             }
         };
 
@@ -116,18 +192,43 @@ export default function OfficeChoresApp() {
 
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log('Auth state changed:', event, session?.user?.email);
+
+            // Clear any existing timeout
+            if (loadingTimeout) clearTimeout(loadingTimeout);
+
             if (session) {
+                // Prevent multiple concurrent profile loads
+                if (isLoadingProfile) {
+                    console.log('Profile already loading, skipping...');
+                    return;
+                }
+
                 setUser(session.user);
-                await loadUserProfile(session.user.id);
+                isLoadingProfile = true;
+
+                try {
+                    await loadUserProfile(session.user.id);
+                } catch (err) {
+                    console.error('Error in onAuthStateChange:', err);
+                    setLoading(false);
+                } finally {
+                    isLoadingProfile = false;
+                }
             } else {
                 setUser(null);
                 setUserProfile(null);
                 setViewState('login');
                 setLoading(false);
+                isLoadingProfile = false;
             }
         });
 
-        return () => subscription.unsubscribe();
+        return () => {
+            mounted = false;
+            subscription.unsubscribe();
+            if (loadingTimeout) clearTimeout(loadingTimeout);
+        };
     }, []);
 
     const loadUserProfile = async (userId) => {
@@ -140,21 +241,28 @@ export default function OfficeChoresApp() {
 
             if (error) {
                 console.error('Error loading profile:', error);
-                // If user doesn't have a profile, sign them out
-                await supabase.auth.signOut();
-                setAuthError('User profile not found. Please contact admin.');
+                // Clear cache and sign out
+                clearAuthCache();
+                // Use a flag to prevent re-triggering onAuthStateChange immediately
+                setTimeout(async () => {
+                    await supabase.auth.signOut();
+                    setAuthError('User profile not found. Please contact admin.');
+                }, 100);
                 setLoading(false);
                 return;
             }
 
             setUserProfile(data);
             setViewState('dashboard');
+            setLoading(false);
         } catch (err) {
             console.error('Error loading profile:', err);
-            // Sign out if there's an error
-            await supabase.auth.signOut();
-            setAuthError('Failed to load user profile');
-        } finally {
+            // Clear cache and sign out
+            clearAuthCache();
+            setTimeout(async () => {
+                await supabase.auth.signOut();
+                setAuthError('Failed to load user profile');
+            }, 100);
             setLoading(false);
         }
     };
@@ -576,16 +684,41 @@ export default function OfficeChoresApp() {
 
     // --- Renderers ---
 
-    if (loading) return (
-        <div className="h-screen flex items-center justify-center bg-white text-rose-500">
-            <div className="animate-pulse flex flex-col items-center">
-                <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center mb-2">
-                    <Lock size={24} />
+    if (loading) {
+        const handleClearCacheAndRetry = () => {
+            clearAuthCache();
+            supabase.auth.signOut().then(() => {
+                window.location.reload();
+            });
+        };
+
+        return (
+            <div className="h-screen flex items-center justify-center bg-white text-rose-500">
+                <div className="animate-pulse flex flex-col items-center">
+                    <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center mb-2">
+                        <Lock size={24} />
+                    </div>
+                    <span className="font-bold mb-4">Loading...</span>
+
+                    {/* Emergency cache clear button - appears after 5 seconds */}
+                    <button
+                        onClick={handleClearCacheAndRetry}
+                        className="mt-4 text-xs text-gray-500 hover:text-rose-500 underline opacity-0 animate-[fadeIn_1s_ease-in-out_5s_forwards]"
+                        style={{ animation: 'fadeIn 1s ease-in-out 5s forwards' }}
+                    >
+                        Stuck? Clear cache & retry
+                    </button>
                 </div>
-                <span className="font-bold">Loading...</span>
+
+                <style>{`
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+                `}</style>
             </div>
-        </div>
-    );
+        );
+    }
 
     // 1. LOGIN VIEW
     if (viewState === 'login') {
